@@ -177,6 +177,9 @@
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
 
+      <label for="studentPid">UCSD PID</label>
+      <input type="text" id="studentPid" required placeholder="e.g. A12345678" style="text-transform: uppercase;">
+
       <label for="typeSelect">Attendance Type</label>
       <select id="typeSelect" required>
         <option value="Lecture">Lecture</option>
@@ -215,7 +218,7 @@
       <input type="number" id="duration" value="15" min="1" max="180">
 
       <button onclick="startSession()">Open Session & Generate QR</button>
-      <button onclick="resetTodayData()" class="btn-danger">Reset Today's Attendance & Devices</button>
+      <button onclick="resetTodayData()" class="btn-danger">Archive Current Records & Reset Today</button>
       <div id="adminStatus" class="status"></div>
     </div>
 
@@ -226,7 +229,7 @@
   </div>
 
   <script>
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrjt2BiPFXdUJ90nvCd3fCRNo3VTVGXwcGNlW4g8WAQ8y53S1bM-0mtvw5vSqdMq-A/exec";
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7CeFL2c43_Kbhlp9c5zUQmswCImVCxv5Sq5Zril3DGJ79g-Sg7YmuDTOiDTvEU8iR0g/exec";
 
     function getSafeDeviceId() {
       let id = "";
@@ -317,7 +320,7 @@
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // 1. 학생 출석 폼 접근 (?token=...)
+      // 1. 학생 출석 링크 접근 (?token=...)
       if (token && token.length > 0) {
         statusMsg.innerText = "Validating session token...";
         statusMsg.style.color = "#4b5563";
@@ -396,16 +399,21 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // 학생 출석 정보 제출
+    // 학생 출석 정보 제출 (Name + PID + Section)
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
       const btn = document.getElementById("submitBtn");
 
       const studentName = ("" + document.getElementById("studentName").value).trim();
+      const studentPid = ("" + document.getElementById("studentPid").value).trim().toUpperCase();
       const attendanceType = ("" + document.getElementById("typeSelect").value);
       const selectedSection = ("" + document.getElementById("sectionSelect").value);
 
+      if (!studentPid) {
+        alert("Please enter your UCSD PID.");
+        return;
+      }
       if (!selectedSection) {
         alert("Please select your enrolled section.");
         return;
@@ -424,6 +432,7 @@
           action: "submitAttendance",
           token: token,
           name: studentName,
+          pid: studentPid,
           section: finalRecord,
           clientIp: currentClientIp,
           deviceId: currentDeviceId
@@ -481,15 +490,15 @@
       }
     }
 
-    // 관리자 당일 전체 리셋
+    // 관리자 당일 아카이브 및 리셋
     async function resetTodayData() {
-      if (!confirm("Are you sure? This will wipe today's attendance sheet and reset all device locks.")) {
+      if (!confirm("Are you sure? This will archive current attendance to a backup tab and create a new sheet for today.")) {
         return;
       }
       const adminKey = ("" + document.getElementById("adminKey").value).trim();
       const adminStatus = document.getElementById("adminStatus");
 
-      adminStatus.innerText = "Resetting records...";
+      adminStatus.innerText = "Archiving and resetting...";
       adminStatus.style.color = "#dc2626";
 
       try {
@@ -499,7 +508,7 @@
         });
 
         if (res && res.status === "success") {
-          alert("Today's attendance data and device locks have been completely reset.");
+          alert("Previous records archived safely. New fresh session created.");
           location.reload();
         } else {
           adminStatus.innerText = (res && res.message) ? res.message : "Reset failed.";
