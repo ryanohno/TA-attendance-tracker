@@ -48,6 +48,16 @@
       font-weight: 600;
       color: #222;
     }
+    .mode-badge {
+      display: inline-block;
+      padding: 0.35rem 0.75rem;
+      background: #e0f2fe;
+      color: #0369a1;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
     .status {
       margin: 1rem 0;
       font-size: 0.9rem;
@@ -140,18 +150,22 @@
       <div>IP: <span id="clientIp">Checking...</span></div>
     </div>
 
+    <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
     <div id="studentMsg" class="status">Checking session validity...</div>
 
     <form id="attendanceForm" class="hidden">
-      <label for="studentId">Student ID</label>
-      <input type="text" id="studentId" required placeholder="e.g. A12345678">
-
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
 
-      <label for="sectionSelect">Section / Class</label>
+      <label for="typeSelect">Attendance Type</label>
+      <select id="typeSelect" required>
+        <option value="Lecture">Lecture</option>
+        <option value="Section">Section Meeting</option>
+      </select>
+
+      <label for="sectionSelect">Your Enrolled Section</label>
       <select id="sectionSelect" required>
-        <option value="Lecture" selected>Lecture</option>
+        <option value="" disabled selected>Select your section</option>
         <option value="Section 1">Section 1</option>
         <option value="Section 2">Section 2</option>
       </select>
@@ -167,7 +181,7 @@
 
   <!-- Admin Panel View -->
   <div class="card hidden" id="adminBox">
-    <h2>VIS 141 Admin</h2>
+    <h2 id="adminPanelTitle">Admin Console</h2>
     <div class="meta-box">
       <div>Target: <span>Google Sheets API</span></div>
       <div>Time: <span id="adminTime">Loading...</span></div>
@@ -198,12 +212,31 @@
   </div>
 
   <script>
-    // Paste your Google Apps Script Web App Deployment URL here
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get("token");
     let currentClientIp = "Unknown";
+
+    // Setup initial schedule state (Wednesday = Lecture auto default)
+    function setupScheduleDefaults() {
+      const today = new Date();
+      const isWednesday = (today.getDay() === 3);
+      const notice = document.getElementById("sessionModeNotice");
+      const typeSelect = document.getElementById("typeSelect");
+
+      if (isWednesday) {
+        notice.innerText = "Wednesday: Full Lecture Attendance";
+        notice.style.background = "#e0f2fe";
+        notice.style.color = "#0369a1";
+        typeSelect.value = "Lecture";
+      } else {
+        notice.innerText = "Section Attendance Mode";
+        notice.style.background = "#f3f4f6";
+        notice.style.color = "#374151";
+        typeSelect.value = "Section";
+      }
+    }
 
     // Live clock update
     function updateClock() {
@@ -217,7 +250,7 @@
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Fetch user public IP address
+    // Fetch IP address
     async function fetchIp() {
       try {
         const res = await fetch("https://api.ipify.org?format=json");
@@ -230,7 +263,7 @@
     }
     fetchIp();
 
-    // CORS-safe API requester for Google Apps Script
+    // CORS-safe API requester
     async function callAppsScript(payload) {
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
@@ -242,7 +275,9 @@
 
     // Student token validation
     async function initStudentView() {
+      setupScheduleDefaults();
       const msg = document.getElementById("studentMsg");
+
       if (!token) {
         msg.innerText = "Please scan the classroom QR code to check in.";
         msg.style.color = "#dc2626";
@@ -265,27 +300,36 @@
       }
     }
 
-    // Student submission handler
+    // Attendance submission handler
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const msg = document.getElementById("studentMsg");
       const btn = document.getElementById("submitBtn");
       
+      const name = document.getElementById("studentName").value.trim();
+      const attendanceType = document.getElementById("typeSelect").value;
+      const selectedSection = document.getElementById("sectionSelect").value;
+
+      if (!selectedSection) {
+        alert("Please select your enrolled section.");
+        return;
+      }
+
       btn.disabled = true;
       msg.innerText = "Submitting attendance...";
       msg.style.color = "#4b5563";
 
-      const studentId = document.getElementById("studentId").value.trim();
-      const name = document.getElementById("studentName").value.trim();
-      const section = document.getElementById("sectionSelect").value;
+      // Result format: "Lecture (Section 1)" or "Section 1"
+      const formattedRecord = attendanceType === "Lecture" 
+        ? `Lecture (${selectedSection})` 
+        : selectedSection;
 
       try {
         const data = await callAppsScript({
           action: "submitAttendance",
           token: token,
-          studentId: studentId,
           name: name,
-          section: section,
+          section: formattedRecord,
           clientIp: currentClientIp
         });
 
@@ -322,44 +366,4 @@
         });
 
         if (data.status === "success") {
-          document.getElementById("adminAuth").classList.add("hidden");
-          document.getElementById("sessionDisplay").classList.remove("hidden");
-
-          const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
-          
-          document.getElementById("qrcode").innerHTML = "";
-          new QRCode(document.getElementById("qrcode"), {
-            text: targetUrl,
-            width: 220,
-            height: 220,
-            correctLevel: QRCode.CorrectLevel.M
-          });
-
-          document.getElementById("timerText").innerText = `Session active for ${duration} minute(s)`;
-        } else {
-          status.innerText = data.message || "Authentication failed.";
-          status.style.color = "#dc2626";
-        }
-      } catch (err) {
-        status.innerText = "Error connecting to Apps Script API. Verify URL & access permissions.";
-        status.style.color = "#dc2626";
-      }
-    }
-
-    function toggleView(view) {
-      if (view === 'admin') {
-        document.getElementById("studentBox").classList.add("hidden");
-        document.getElementById("adminBox").classList.remove("hidden");
-      } else {
-        document.getElementById("adminBox").classList.add("hidden");
-        document.getElementById("studentBox").classList.remove("hidden");
-      }
-    }
-
-    if (!window.location.search.includes("admin")) {
-      initStudentView();
-    }
-  </script>
-</body>
-</html>
-
+          document.getElementById
