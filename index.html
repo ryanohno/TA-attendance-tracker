@@ -163,7 +163,7 @@
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
     <div id="statusMsg" class="status">Initializing...</div>
 
-    <!-- QR Section -->
+    <!-- QR Section (Instructor Screen) -->
     <div id="qrSection" class="hidden">
       <div id="qrcodeContainer">
         <img id="qrImage" src="" alt="Attendance QR Code">
@@ -226,7 +226,7 @@
   </div>
 
   <script>
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7CeFL2c43_Kbhlp9c5zUQmswCImVCxv5Sq5Zril3DGJ79g-Sg7YmuDTOiDTvEU8iR0g/exec";
 
     function getSafeDeviceId() {
       let id = "";
@@ -330,7 +330,6 @@
             const localSavedKey = localStorage.getItem("vis141_submitted_lock") || "";
             const currentLockKey = getTodayString() + "_" + serverNonce;
 
-            // 관리자가 리셋을 누른 경우(Nonce 변경 시) 이전 로컬 락 자동 해제
             if (localSavedKey === currentLockKey) {
               statusMsg.innerText = "This device has already submitted attendance today.";
               statusMsg.style.color = "#dc2626";
@@ -397,7 +396,7 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // 학생 폼 제출
+    // 학생 출석 정보 제출
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
@@ -431,7 +430,6 @@
         });
 
         if (res && res.status === "success") {
-          // 기기 락 저장
           try {
             const check = await callAppsScript({ action: "getActiveSession" });
             const nonce = (check && check.resetNonce) ? check.resetNonce : "1";
