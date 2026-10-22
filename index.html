@@ -100,7 +100,7 @@
     button:hover {
       background-color: #374151;
     }
-    #qrcode, #projectorQrcode {
+    #qrcodeDisplay {
       display: flex;
       justify-content: center;
       margin: 1.5rem 0;
@@ -118,7 +118,7 @@
       background: none;
       border: none;
       color: #9ca3af;
-      font-size: 0.7rem;
+      font-size: 0.75rem;
       cursor: pointer;
       text-decoration: underline;
       padding: 0;
@@ -141,9 +141,9 @@
 </head>
 <body>
 
-  <!-- 1. Student Check-in View -->
-  <div class="card" id="studentBox">
-    <h2>VIS 141 Attendance</h2>
+  <!-- Main View: QR Display (Default) or Form (When token present) -->
+  <div class="card" id="mainBox">
+    <h2 id="mainTitle">VIS 141 Attendance</h2>
     
     <div class="meta-box">
       <div>Time: <span id="clientTime">--:--:--</span></div>
@@ -151,8 +151,16 @@
     </div>
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
-    <div id="studentMsg" class="status"></div>
+    <div id="statusMsg" class="status">Checking active session...</div>
 
+    <!-- QR Container (Shown on main screen when session is active) -->
+    <div id="qrSection" class="hidden">
+      <div id="qrcodeDisplay"></div>
+      <p id="qrTimer" style="font-weight: 600; color: #16a34a; font-size: 0.95rem; margin: 0.5rem 0;"></p>
+      <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
+    </div>
+
+    <!-- Student Attendance Form (Shown only when token is present in URL) -->
     <form id="attendanceForm" class="hidden">
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
@@ -174,35 +182,14 @@
     </form>
 
     <div class="admin-footer">
-      <div style="display:flex; gap:12px;">
-        <button class="admin-toggle-btn" onclick="toggleView('admin')">Admin Console</button>
-        <button class="admin-toggle-btn" onclick="toggleView('projector')">Projector Screen</button>
-      </div>
+      <button class="admin-toggle-btn" onclick="toggleAdmin(true)">Admin Console</button>
       <div class="credits">Made by Ryan Oh</div>
     </div>
   </div>
 
-  <!-- 2. Projector Fullscreen Display View -->
-  <div class="card hidden" id="projectorBox">
-    <h2>Classroom Attendance QR</h2>
-    <div class="meta-box">
-      <div>Time: <span id="projectorTime">--:--:--</span></div>
-      <div>Status: <span id="projectorStatus" style="color:#2563eb;">Waiting for session...</span></div>
-    </div>
-
-    <div id="projectorQrcode"></div>
-    <p id="projectorTimer" style="font-weight: 600; color: #16a34a; font-size: 0.95rem; margin: 0.5rem 0;"></p>
-    <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
-
-    <div class="admin-footer">
-      <button class="admin-toggle-btn" onclick="toggleView('student')">Back to Check-in</button>
-      <div class="credits">Made by Ryan Oh</div>
-    </div>
-  </div>
-
-  <!-- 3. Admin Console View -->
+  <!-- Admin View -->
   <div class="card hidden" id="adminBox">
-    <h2 id="adminPanelTitle">Admin Console</h2>
+    <h2>Admin Console</h2>
     <div class="meta-box">
       <div>Target: <span>Google Sheets API</span></div>
       <div>Time: <span id="adminTime">--:--:--</span></div>
@@ -215,19 +202,12 @@
       <label for="duration">Session Duration (Minutes)</label>
       <input type="number" id="duration" value="15" min="1" max="180">
 
-      <button onclick="startSession()">Generate QR & Open Session</button>
+      <button onclick="startSession()">Open Session & Generate QR</button>
       <div id="adminStatus" class="status"></div>
     </div>
 
-    <div id="sessionDisplay" class="hidden">
-      <div id="qrcode"></div>
-      <p id="timerText" style="font-weight: 600; color: #16a34a; font-size: 0.9rem; margin: 0.5rem 0;"></p>
-      <p style="font-size: 0.75rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
-      <button onclick="location.reload()" style="background-color: #dc2626;">Close Session</button>
-    </div>
-
     <div class="admin-footer">
-      <button class="admin-toggle-btn" onclick="toggleView('student')">Return to Student Check-in</button>
+      <button class="admin-toggle-btn" onclick="toggleAdmin(false)">Return to Main Screen</button>
       <div class="credits">Made by Ryan Oh</div>
     </div>
   </div>
@@ -237,27 +217,23 @@
 
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get("token");
-    const isDisplayMode = urlParams.get("display") === "qr";
     let currentClientIp = "Unknown";
-    let projectorPollingTimer = null;
-    let lastRenderedToken = null;
+    let timerInterval = null;
 
-    // 1. Clock update (executed immediately)
+    // Clock
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const elStudent = document.getElementById("clientTime");
+      const elClient = document.getElementById("clientTime");
       const elAdmin = document.getElementById("adminTime");
-      const elProj = document.getElementById("projectorTime");
-      if (elStudent) elStudent.innerText = timeStr;
+      if (elClient) elClient.innerText = timeStr;
       if (elAdmin) elAdmin.innerText = timeStr;
-      if (elProj) elProj.innerText = timeStr;
     }
     updateClock();
     setInterval(updateClock, 1000);
 
-    // 2. Schedule setup (executed immediately)
-    function setupScheduleDefaults() {
+    // Schedule default
+    function setupSchedule() {
       const today = new Date();
       const isWednesday = (today.getDay() === 3);
       const notice = document.getElementById("sessionModeNotice");
@@ -275,9 +251,9 @@
         if (typeSelect) typeSelect.value = "Section";
       }
     }
-    setupScheduleDefaults();
+    setupSchedule();
 
-    // 3. Fast non-blocking IP fetch with 2s timeout
+    // Fast IP
     async function fetchIp() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
@@ -288,13 +264,12 @@
         currentClientIp = data.ip;
         document.getElementById("clientIp").innerText = currentClientIp;
       } catch (err) {
-        currentClientIp = "Local/Direct";
+        currentClientIp = "Direct";
         document.getElementById("clientIp").innerText = "Direct";
       }
     }
     fetchIp();
 
-    // 4. Safe API caller with 6s timeout
     async function callAppsScript(payload) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -313,41 +288,84 @@
       }
     }
 
-    // 5. Student view verification
-    async function initStudentView() {
-      const msg = document.getElementById("studentMsg");
+    // Main Router
+    async function initPage() {
+      const statusMsg = document.getElementById("statusMsg");
 
-      if (!token) {
-        msg.innerText = "Please scan the projector QR code in the classroom to check in.";
-        msg.style.color = "#dc2626";
+      // 1. If URL has ?token=... (Student scanned QR)
+      if (token) {
+        statusMsg.innerText = "Validating session...";
+        try {
+          const data = await callAppsScript({ action: "validateToken", token: token });
+          if (data.status === "valid") {
+            statusMsg.innerText = "Session active. Enter your details below.";
+            statusMsg.style.color = "#16a34a";
+            document.getElementById("attendanceForm").classList.remove("hidden");
+          } else {
+            statusMsg.innerText = data.message || "This attendance link is invalid or expired.";
+            statusMsg.style.color = "#dc2626";
+          }
+        } catch (e) {
+          statusMsg.innerText = "Failed to connect to backend.";
+          statusMsg.style.color = "#dc2626";
+        }
         return;
       }
 
-      msg.innerText = "Validating session...";
-      msg.style.color = "#4b5563";
-
+      // 2. Default screen without token (Display QR if session is alive)
+      statusMsg.innerText = "Checking active session...";
       try {
-        const data = await callAppsScript({ action: "validateToken", token: token });
-        if (data.status === "valid") {
-          msg.innerText = "Session active. Enter your details below.";
-          msg.style.color = "#16a34a";
-          document.getElementById("attendanceForm").classList.remove("hidden");
+        const data = await callAppsScript({ action: "getActiveSession" });
+        if (data.status === "active") {
+          statusMsg.innerText = "";
+          renderQr(data.token, data.expiresAtMs);
         } else {
-          msg.innerText = data.message || "This attendance link is invalid or expired.";
-          msg.style.color = "#dc2626";
+          statusMsg.innerText = "No Active Session. Waiting for instructor to open session.";
+          statusMsg.style.color = "#6b7280";
         }
       } catch (e) {
-        msg.innerText = "Connection timeout. Please verify backend deployment.";
-        msg.style.color = "#dc2626";
+        statusMsg.innerText = "Cannot fetch session status. Check Apps Script URL.";
+        statusMsg.style.color = "#dc2626";
       }
     }
 
-    // 6. Submit attendance
+    function renderQr(activeToken, expiresAtMs) {
+      document.getElementById("mainTitle").innerText = "Attendance QR Code";
+      document.getElementById("qrSection").classList.remove("hidden");
+
+      const qrContainer = document.getElementById("qrcodeDisplay");
+      qrContainer.innerHTML = "";
+      const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(activeToken);
+
+      new QRCode(qrContainer, {
+        text: targetUrl,
+        width: 240,
+        height: 240,
+        correctLevel: QRCode.CorrectLevel.M
+      });
+
+      if (timerInterval) clearInterval(timerInterval);
+      function updateRemaining() {
+        const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+        const mins = Math.floor(remainingSec / 60);
+        const secs = remainingSec % 60;
+        document.getElementById("qrTimer").innerText = `Time Remaining: ${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+
+        if (remainingSec <= 0) {
+          clearInterval(timerInterval);
+          location.reload();
+        }
+      }
+      updateRemaining();
+      timerInterval = setInterval(updateRemaining, 1000);
+    }
+
+    // Student Form Submit
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const msg = document.getElementById("studentMsg");
+      const statusMsg = document.getElementById("statusMsg");
       const btn = document.getElementById("submitBtn");
-      
+
       const name = document.getElementById("studentName").value.trim();
       const attendanceType = document.getElementById("typeSelect").value;
       const selectedSection = document.getElementById("sectionSelect").value;
@@ -358,8 +376,8 @@
       }
 
       btn.disabled = true;
-      msg.innerText = "Submitting attendance...";
-      msg.style.color = "#4b5563";
+      statusMsg.innerText = "Submitting attendance...";
+      statusMsg.style.color = "#4b5563";
 
       const formattedRecord = attendanceType === "Lecture" 
         ? `Lecture (${selectedSection})` 
@@ -376,28 +394,28 @@
 
         if (data.status === "success") {
           document.getElementById("attendanceForm").classList.add("hidden");
-          msg.innerText = data.message || "Attendance recorded successfully.";
-          msg.style.color = "#16a34a";
+          statusMsg.innerText = data.message || "Attendance recorded successfully.";
+          statusMsg.style.color = "#16a34a";
         } else {
-          msg.innerText = data.message || "Submission failed.";
-          msg.style.color = "#dc2626";
+          statusMsg.innerText = data.message || "Submission failed.";
+          statusMsg.style.color = "#dc2626";
           btn.disabled = false;
         }
       } catch (err) {
-        msg.innerText = "Submission timeout. Check network connection.";
-        msg.style.color = "#dc2626";
+        statusMsg.innerText = "Submission timeout. Check network connection.";
+        statusMsg.style.color = "#dc2626";
         btn.disabled = false;
       }
     });
 
-    // 7. Admin session starter
+    // Admin Start Session
     async function startSession() {
       const adminKey = document.getElementById("adminKey").value.trim();
       const duration = document.getElementById("duration").value;
-      const status = document.getElementById("adminStatus");
+      const adminStatus = document.getElementById("adminStatus");
 
-      status.innerText = "Connecting to backend...";
-      status.style.color = "#4b5563";
+      adminStatus.innerText = "Starting session...";
+      adminStatus.style.color = "#4b5563";
 
       try {
         const data = await callAppsScript({
@@ -407,98 +425,29 @@
         });
 
         if (data.status === "success") {
-          document.getElementById("adminAuth").classList.add("hidden");
-          document.getElementById("sessionDisplay").classList.remove("hidden");
-          document.getElementById("adminPanelTitle").innerText = "Attendance QR Code";
-
-          const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
-          
-          document.getElementById("qrcode").innerHTML = "";
-          new QRCode(document.getElementById("qrcode"), {
-            text: targetUrl,
-            width: 220,
-            height: 220,
-            correctLevel: QRCode.CorrectLevel.M
-          });
-
-          document.getElementById("timerText").innerText = `Session active for ${duration} minute(s)`;
+          toggleAdmin(false);
+          renderQr(data.token, data.expiresAtMs);
         } else {
-          status.innerText = data.message || "Authentication failed.";
-          status.style.color = "#dc2626";
+          adminStatus.innerText = data.message || "Authentication failed.";
+          adminStatus.style.color = "#dc2626";
         }
       } catch (err) {
-        status.innerText = "Failed to connect to backend. Verify Apps Script permissions.";
-        status.style.color = "#dc2626";
+        adminStatus.innerText = "Failed to communicate with backend.";
+        adminStatus.style.color = "#dc2626";
       }
     }
 
-    // 8. Projector Polling
-    async function pollProjectorSession() {
-      try {
-        const data = await callAppsScript({ action: "getActiveSession" });
-        const statusEl = document.getElementById("projectorStatus");
-        const timerEl = document.getElementById("projectorTimer");
-        const qrEl = document.getElementById("projectorQrcode");
-
-        if (data.status === "active") {
-          statusEl.innerText = "Active Session";
-          statusEl.style.color = "#16a34a";
-
-          if (lastRenderedToken !== data.token) {
-            lastRenderedToken = data.token;
-            qrEl.innerHTML = "";
-            const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
-            new QRCode(qrEl, {
-              text: targetUrl,
-              width: 250,
-              height: 250,
-              correctLevel: QRCode.CorrectLevel.M
-            });
-          }
-
-          const remainingSec = Math.max(0, Math.floor((new Date(data.expiresAt) - new Date()) / 1000));
-          const mins = Math.floor(remainingSec / 60);
-          const secs = remainingSec % 60;
-          timerEl.innerText = `Time Remaining: ${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
-        } else {
-          statusEl.innerText = "No Active Session";
-          statusEl.style.color = "#6b7280";
-          timerEl.innerText = "Waiting for instructor to open session...";
-          qrEl.innerHTML = "";
-          lastRenderedToken = null;
-        }
-      } catch (e) {
-        // Ignore periodic network errors
-      }
-    }
-
-    function toggleView(view) {
-      document.getElementById("studentBox").classList.add("hidden");
-      document.getElementById("adminBox").classList.add("hidden");
-      document.getElementById("projectorBox").classList.add("hidden");
-      if (projectorPollingTimer) {
-        clearInterval(projectorPollingTimer);
-        projectorPollingTimer = null;
-      }
-
-      if (view === 'admin') {
+    function toggleAdmin(show) {
+      if (show) {
+        document.getElementById("mainBox").classList.add("hidden");
         document.getElementById("adminBox").classList.remove("hidden");
-        document.getElementById("adminPanelTitle").innerText = "Admin Console";
-      } else if (view === 'projector') {
-        document.getElementById("projectorBox").classList.remove("hidden");
-        pollProjectorSession();
-        projectorPollingTimer = setInterval(pollProjectorSession, 4000);
       } else {
-        document.getElementById("studentBox").classList.remove("hidden");
+        document.getElementById("adminBox").classList.add("hidden");
+        document.getElementById("mainBox").classList.remove("hidden");
       }
     }
 
-    if (isDisplayMode) {
-      toggleView('projector');
-    } else if (!window.location.search.includes("admin")) {
-      initStudentView();
-    }
+    initPage();
   </script>
 </body>
 </html>
-
