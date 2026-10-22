@@ -151,7 +151,7 @@
 </head>
 <body>
 
-  <!-- Main View -->
+  <!-- 메인 뷰 -->
   <div class="card" id="mainBox">
     <h2 id="mainTitle">VIS 141 Attendance</h2>
     
@@ -163,7 +163,7 @@
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
     <div id="statusMsg" class="status">Initializing...</div>
 
-    <!-- QR Section (Instructor Screen) -->
+    <!-- QR 화면 (강의실 프로젝터 화면) -->
     <div id="qrSection" class="hidden">
       <div id="qrcodeContainer">
         <img id="qrImage" src="" alt="Attendance QR Code">
@@ -172,7 +172,7 @@
       <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
     </div>
 
-    <!-- Student Attendance Form -->
+    <!-- 학생 출석 입력 폼 -->
     <form id="attendanceForm" class="hidden">
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
@@ -202,7 +202,7 @@
     </div>
   </div>
 
-  <!-- Admin View -->
+  <!-- 관리자 콘솔 뷰 -->
   <div class="card hidden" id="adminBox">
     <h2>Admin Console</h2>
     <div class="meta-box">
@@ -229,7 +229,8 @@
   </div>
 
   <script>
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrjt2BiPFXdUJ90nvCd3fCRNo3VTVGXwcGNlW4g8WAQ8y53S1bM-0mtvw5vSqdMq-A/exec";
+    // 새 구글 웹 앱 URL을 여기에 붙여넣습니다.
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz99pVwwvl6dcKdQYVFUQuAp4rEtfrIyZnL0ccR7KUbFa8mTZ0OwV2wLD5jWQAq2zCWrg/exec";
 
     function getSafeDeviceId() {
       let id = "";
@@ -320,7 +321,7 @@
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // 1. 학생 출석 링크 접근 (?token=...)
+      // 1. 학생 출석 링크 접속 (?token=...)
       if (token && token.length > 0) {
         statusMsg.innerText = "Validating session token...";
         statusMsg.style.color = "#4b5563";
@@ -353,7 +354,7 @@
         return;
       }
 
-      // 2. 메인 화면 세션 상태 확인
+      // 2. 메인 화면 활성 세션 상태 확인
       statusMsg.innerText = "Checking active session...";
       try {
         const res = await callAppsScript({ action: "getActiveSession" });
@@ -399,7 +400,7 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // 학생 출석 정보 제출 (Name + PID + Section)
+    // 학생 정보 제출
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
@@ -490,7 +491,7 @@
       }
     }
 
-    // 관리자 당일 아카이브 및 리셋
+    // 관리자 당일 아카이빙 및 전체 리셋
     async function resetTodayData() {
       if (!confirm("Are you sure? This will archive current attendance to a backup tab and create a new sheet for today.")) {
         return;
@@ -534,4 +535,3 @@
   </script>
 </body>
 </html>
-
