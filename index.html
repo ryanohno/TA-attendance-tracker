@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Class Attendance System</title>
+  <title>VIS 141 Attendance</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; }
@@ -16,7 +16,7 @@
       margin: 0;
       background-color: #f7f9fa;
       color: #111;
-      padding: 1rem;
+      padding: 1.25rem 1rem;
     }
     .card {
       background: #ffffff;
@@ -32,6 +32,7 @@
       margin-bottom: 0.5rem;
       font-size: 1.35rem;
       letter-spacing: -0.02em;
+      font-weight: 700;
     }
     .meta-box {
       background: #f1f4f6;
@@ -60,7 +61,7 @@
       margin-bottom: 0.35rem;
       text-align: left;
     }
-    input {
+    input, select {
       width: 100%;
       padding: 0.75rem;
       margin-bottom: 1rem;
@@ -68,9 +69,10 @@
       border-radius: 6px;
       font-size: 0.95rem;
       outline: none;
+      background-color: #fff;
       transition: border-color 0.2s;
     }
-    input:focus {
+    input:focus, select:focus {
       border-color: #111;
     }
     button {
@@ -94,9 +96,13 @@
       margin: 1.5rem 0;
     }
     .admin-footer {
-      margin-top: 2rem;
+      margin-top: 1.75rem;
       padding-top: 1rem;
       border-top: 1px solid #eaeaea;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
     }
     .admin-toggle-btn {
       background: none;
@@ -113,6 +119,11 @@
       background: none;
       color: #4b5563;
     }
+    .credits {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      letter-spacing: 0.02em;
+    }
     .hidden {
       display: none;
     }
@@ -122,7 +133,7 @@
 
   <!-- Student Form View -->
   <div class="card" id="studentBox">
-    <h2>Attendance Check-in</h2>
+    <h2>VIS 141 Attendance</h2>
     
     <div class="meta-box">
       <div>Time: <span id="clientTime">Loading...</span></div>
@@ -138,19 +149,27 @@
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
 
+      <label for="sectionSelect">Section / Class</label>
+      <select id="sectionSelect" required>
+        <option value="Lecture" selected>Lecture</option>
+        <option value="Section 1">Section 1</option>
+        <option value="Section 2">Section 2</option>
+      </select>
+
       <button type="submit" id="submitBtn">Submit Attendance</button>
     </form>
 
     <div class="admin-footer">
       <button class="admin-toggle-btn" onclick="toggleView('admin')">Admin Console</button>
+      <div class="credits">Made by Ryan Oh</div>
     </div>
   </div>
 
   <!-- Admin Panel View -->
   <div class="card hidden" id="adminBox">
-    <h2>Admin Dashboard</h2>
+    <h2>VIS 141 Admin</h2>
     <div class="meta-box">
-      <div>Server Target: <span>Google Sheets API</span></div>
+      <div>Target: <span>Google Sheets API</span></div>
       <div>Time: <span id="adminTime">Loading...</span></div>
     </div>
 
@@ -174,10 +193,12 @@
 
     <div class="admin-footer">
       <button class="admin-toggle-btn" onclick="toggleView('student')">Return to Student Check-in</button>
+      <div class="credits">Made by Ryan Oh</div>
     </div>
   </div>
 
   <script>
+    // Paste your Google Apps Script Web App Deployment URL here
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -256,6 +277,7 @@
 
       const studentId = document.getElementById("studentId").value.trim();
       const name = document.getElementById("studentName").value.trim();
+      const section = document.getElementById("sectionSelect").value;
 
       try {
         const data = await callAppsScript({
@@ -263,6 +285,7 @@
           token: token,
           studentId: studentId,
           name: name,
+          section: section,
           clientIp: currentClientIp
         });
 
@@ -339,3 +362,4 @@
   </script>
 </body>
 </html>
+
