@@ -24,7 +24,7 @@
       border-radius: 12px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
       width: 100%;
-      max-width: 400px;
+      max-width: 420px;
       text-align: center;
     }
     h2 {
@@ -100,7 +100,7 @@
     button:hover {
       background-color: #374151;
     }
-    #qrcode {
+    #qrcode, #projectorQrcode {
       display: flex;
       justify-content: center;
       margin: 1.5rem 0;
@@ -141,7 +141,7 @@
 </head>
 <body>
 
-  <!-- Student Form View -->
+  <!-- 1. Student Check-in View -->
   <div class="card" id="studentBox">
     <h2>VIS 141 Attendance</h2>
     
@@ -174,12 +174,33 @@
     </form>
 
     <div class="admin-footer">
-      <button class="admin-toggle-btn" onclick="toggleView('admin')">Admin Console</button>
+      <div style="display:flex; gap:12px;">
+        <button class="admin-toggle-btn" onclick="toggleView('admin')">Admin Console</button>
+        <button class="admin-toggle-btn" onclick="toggleView('projector')">Projector Screen</button>
+      </div>
       <div class="credits">Made by Ryan Oh</div>
     </div>
   </div>
 
-  <!-- Admin Panel View -->
+  <!-- 2. Projector Fullscreen Display View -->
+  <div class="card hidden" id="projectorBox">
+    <h2>Classroom Attendance QR</h2>
+    <div class="meta-box">
+      <div>Time: <span id="projectorTime">Loading...</span></div>
+      <div>Status: <span id="projectorStatus" style="color:#2563eb;">Waiting for session...</span></div>
+    </div>
+
+    <div id="projectorQrcode"></div>
+    <p id="projectorTimer" style="font-weight: 600; color: #16a34a; font-size: 0.95rem; margin: 0.5rem 0;"></p>
+    <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
+
+    <div class="admin-footer">
+      <button class="admin-toggle-btn" onclick="toggleView('student')">Back to Check-in</button>
+      <div class="credits">Made by Ryan Oh</div>
+    </div>
+  </div>
+
+  <!-- 3. Admin Console View -->
   <div class="card hidden" id="adminBox">
     <h2 id="adminPanelTitle">Admin Console</h2>
     <div class="meta-box">
@@ -216,9 +237,11 @@
 
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get("token");
+    const isDisplayMode = urlParams.get("display") === "qr";
     let currentClientIp = "Unknown";
+    let projectorPollingTimer = null;
+    let lastRenderedToken = null;
 
-    // Setup initial schedule state (Wednesday = Lecture auto default)
     function setupScheduleDefaults() {
       const today = new Date();
       const isWednesday = (today.getDay() === 3);
@@ -238,19 +261,19 @@
       }
     }
 
-    // Live clock update
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       const elStudent = document.getElementById("clientTime");
       const elAdmin = document.getElementById("adminTime");
+      const elProj = document.getElementById("projectorTime");
       if (elStudent) elStudent.innerText = timeStr;
       if (elAdmin) elAdmin.innerText = timeStr;
+      if (elProj) elProj.innerText = timeStr;
     }
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Fetch IP address
     async function fetchIp() {
       try {
         const res = await fetch("https://api.ipify.org?format=json");
@@ -263,7 +286,6 @@
     }
     fetchIp();
 
-    // CORS-safe API requester
     async function callAppsScript(payload) {
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
@@ -273,13 +295,13 @@
       return await res.json();
     }
 
-    // Student token validation
+    // 학생 화면 진입 처리
     async function initStudentView() {
       setupScheduleDefaults();
       const msg = document.getElementById("studentMsg");
 
       if (!token) {
-        msg.innerText = "Please scan the classroom QR code to check in.";
+        msg.innerText = "Please scan the projector QR code in the classroom to check in.";
         msg.style.color = "#dc2626";
         return;
       }
@@ -300,7 +322,7 @@
       }
     }
 
-    // Attendance submission handler
+    // 학생 정보 제출
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const msg = document.getElementById("studentMsg");
@@ -319,7 +341,6 @@
       msg.innerText = "Submitting attendance...";
       msg.style.color = "#4b5563";
 
-      // Result format: "Lecture (Section 1)" or "Section 1"
       const formattedRecord = attendanceType === "Lecture" 
         ? `Lecture (${selectedSection})` 
         : selectedSection;
@@ -349,7 +370,7 @@
       }
     });
 
-    // Admin session creation
+    // 관리자 세션 시작
     async function startSession() {
       const adminKey = document.getElementById("adminKey").value.trim();
       const duration = document.getElementById("duration").value;
@@ -366,4 +387,99 @@
         });
 
         if (data.status === "success") {
-          document.getElementById
+          document.getElementById("adminAuth").classList.add("hidden");
+          document.getElementById("sessionDisplay").classList.remove("hidden");
+          document.getElementById("adminPanelTitle").innerText = "Attendance QR Code";
+
+          const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
+          
+          document.getElementById("qrcode").innerHTML = "";
+          new QRCode(document.getElementById("qrcode"), {
+            text: targetUrl,
+            width: 220,
+            height: 220,
+            correctLevel: QRCode.CorrectLevel.M
+          });
+
+          document.getElementById("timerText").innerText = `Session active for ${duration} minute(s)`;
+        } else {
+          status.innerText = data.message || "Authentication failed.";
+          status.style.color = "#dc2626";
+        }
+      } catch (err) {
+        status.innerText = "Error connecting to Apps Script API. Verify URL & access permissions.";
+        status.style.color = "#dc2626";
+      }
+    }
+
+    // 프로젝터 실시간 동기화 루프
+    async function pollProjectorSession() {
+      try {
+        const data = await callAppsScript({ action: "getActiveSession" });
+        const statusEl = document.getElementById("projectorStatus");
+        const timerEl = document.getElementById("projectorTimer");
+        const qrEl = document.getElementById("projectorQrcode");
+
+        if (data.status === "active") {
+          statusEl.innerText = "Active Session";
+          statusEl.style.color = "#16a34a";
+
+          // 토큰이 새로 생겼거나 바뀌었을 때만 QR 갱신
+          if (lastRenderedToken !== data.token) {
+            lastRenderedToken = data.token;
+            qrEl.innerHTML = "";
+            const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
+            new QRCode(qrEl, {
+              text: targetUrl,
+              width: 250,
+              height: 250,
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          }
+
+          const remainingSec = Math.max(0, Math.floor((new Date(data.expiresAt) - new Date()) / 1000));
+          const mins = Math.floor(remainingSec / 60);
+          const secs = remainingSec % 60;
+          timerEl.innerText = `Time Remaining: ${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+        } else {
+          statusEl.innerText = "No Active Session";
+          statusEl.style.color = "#6b7280";
+          timerEl.innerText = "Waiting for instructor to open session...";
+          qrEl.innerHTML = "";
+          lastRenderedToken = null;
+        }
+      } catch (e) {
+        // 네트워크 일시 오류 시 무시하고 다음 루프 실행
+      }
+    }
+
+    function toggleView(view) {
+      document.getElementById("studentBox").classList.add("hidden");
+      document.getElementById("adminBox").classList.add("hidden");
+      document.getElementById("projectorBox").classList.add("hidden");
+      if (projectorPollingTimer) {
+        clearInterval(projectorPollingTimer);
+        projectorPollingTimer = null;
+      }
+
+      if (view === 'admin') {
+        document.getElementById("adminBox").classList.remove("hidden");
+        document.getElementById("adminPanelTitle").innerText = "Admin Console";
+      } else if (view === 'projector') {
+        document.getElementById("projectorBox").classList.remove("hidden");
+        pollProjectorSession();
+        projectorPollingTimer = setInterval(pollProjectorSession, 4000); // 4초마다 자동 동기화
+      } else {
+        document.getElementById("studentBox").classList.remove("hidden");
+      }
+    }
+
+    // URL 파라미터가 ?display=qr 인 경우 바로 프로젝터 모드로 시작
+    if (isDisplayMode) {
+      toggleView('projector');
+    } else if (!window.location.search.includes("admin")) {
+      initStudentView();
+    }
+  </script>
+</body>
+</html>
