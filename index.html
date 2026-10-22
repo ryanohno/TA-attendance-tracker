@@ -1,157 +1,339 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>출석 시스템</title>
+  <title>Class Attendance System</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f4f6f8; }
-    .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 420px; box-sizing: border-box; text-align: center; }
-    h2 { margin-top: 0; color: #111; }
-    input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
-    button { width: 100%; padding: 0.8rem; background: #111; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600; }
-    button:hover { background: #333; }
-    .status { margin-top: 1rem; font-size: 0.95rem; }
-    #qrcode { display: flex; justify-content: center; margin: 1.5rem 0; }
-    .hidden { display: none; }
-    .admin-link { margin-top: 1.5rem; font-size: 0.8rem; color: #888; cursor: pointer; text-decoration: underline; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background-color: #f7f9fa;
+      color: #111;
+      padding: 1rem;
+    }
+    .card {
+      background: #ffffff;
+      padding: 2.25rem 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    h2 {
+      margin-top: 0;
+      margin-bottom: 0.5rem;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+    }
+    .meta-box {
+      background: #f1f4f6;
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      margin: 1.25rem 0;
+      font-size: 0.8rem;
+      color: #555;
+      line-height: 1.45;
+      text-align: left;
+    }
+    .meta-box div span {
+      font-weight: 600;
+      color: #222;
+    }
+    .status {
+      margin: 1rem 0;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #444;
+      display: block;
+      margin-bottom: 0.35rem;
+      text-align: left;
+    }
+    input {
+      width: 100%;
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #111;
+    }
+    button {
+      width: 100%;
+      padding: 0.75rem;
+      background-color: #111827;
+      color: #ffffff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #374151;
+    }
+    #qrcode {
+      display: flex;
+      justify-content: center;
+      margin: 1.5rem 0;
+    }
+    .admin-footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid #eaeaea;
+    }
+    .admin-toggle-btn {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 0.7rem;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 0;
+      font-weight: normal;
+      width: auto;
+    }
+    .admin-toggle-btn:hover {
+      background: none;
+      color: #4b5563;
+    }
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
 
-  <!-- 학생 뷰 -->
+  <!-- Student Form View -->
   <div class="card" id="studentBox">
-    <h2>강의 출석 체크</h2>
-    <div id="studentMsg" class="status">세션 확인 중...</div>
+    <h2>Attendance Check-in</h2>
     
-    <form id="attendanceForm" class="hidden" style="margin-top: 1.5rem; text-align: left;">
-      <label style="font-size:0.85rem; font-weight:600; color:#555;">학번</label>
-      <input type="text" id="studentId" required placeholder="학번 입력">
-      <label style="font-size:0.85rem; font-weight:600; color:#555;">이름</label>
-      <input type="text" id="studentName" required placeholder="이름 입력">
-      <button type="submit">출석 완료</button>
+    <div class="meta-box">
+      <div>Time: <span id="clientTime">Loading...</span></div>
+      <div>IP: <span id="clientIp">Checking...</span></div>
+    </div>
+
+    <div id="studentMsg" class="status">Checking session validity...</div>
+
+    <form id="attendanceForm" class="hidden">
+      <label for="studentId">Student ID</label>
+      <input type="text" id="studentId" required placeholder="e.g. A12345678">
+
+      <label for="studentName">Full Name</label>
+      <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
+
+      <button type="submit" id="submitBtn">Submit Attendance</button>
     </form>
-    
-    <div class="admin-link" onclick="openAdmin()">관리자 모드 (프로젝터용)</div>
+
+    <div class="admin-footer">
+      <button class="admin-toggle-btn" onclick="toggleView('admin')">Admin Console</button>
+    </div>
   </div>
 
-  <!-- 관리자 / 프로젝터 뷰 -->
+  <!-- Admin Panel View -->
   <div class="card hidden" id="adminBox">
-    <h2>출석 QR 생성기</h2>
-    <div id="adminAuth">
-      <input type="password" id="adminKey" placeholder="관리자 암호">
-      <input type="number" id="duration" value="15" placeholder="유효 시간(분 단위)">
-      <button onclick="startSession()">QR 생성 및 출석 시작</button>
+    <h2>Admin Dashboard</h2>
+    <div class="meta-box">
+      <div>Server Target: <span>Google Sheets API</span></div>
+      <div>Time: <span id="adminTime">Loading...</span></div>
     </div>
-    
+
+    <div id="adminAuth">
+      <label for="adminKey">Admin Passkey</label>
+      <input type="password" id="adminKey" placeholder="Enter key">
+
+      <label for="duration">Session Duration (Minutes)</label>
+      <input type="number" id="duration" value="15" min="1" max="180">
+
+      <button onclick="startSession()">Generate QR & Open Session</button>
+      <div id="adminStatus" class="status"></div>
+    </div>
+
     <div id="sessionDisplay" class="hidden">
       <div id="qrcode"></div>
-      <p id="timerText" style="font-weight: 600; color: #16a34a;"></p>
-      <p style="font-size: 0.85rem; color: #666;">스마트폰 기본 카메라로 QR을 스캔하세요.</p>
-      <button onclick="closeSession()" style="background: #b91c1c; margin-top: 1rem;">출석 조기 마감</button>
+      <p id="timerText" style="font-weight: 600; color: #16a34a; font-size: 0.9rem; margin: 0.5rem 0;"></p>
+      <p style="font-size: 0.75rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
+      <button onclick="location.reload()" style="background-color: #dc2626;">Close Session</button>
     </div>
-    
-    <div class="admin-link" onclick="location.href = location.pathname">학생 폼으로 이동</div>
+
+    <div class="admin-footer">
+      <button class="admin-toggle-btn" onclick="toggleView('student')">Return to Student Check-in</button>
+    </div>
   </div>
 
   <script>
-    // 배포한 Apps Script 웹 앱 URL 입력
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get("token");
+    let currentClientIp = "Unknown";
 
-    // 학생 화면 진입 처리
-    async function initStudentView() {
-      if (!token) {
-        document.getElementById("studentMsg").innerText = "화면의 QR 코드를 스캔하여 접속해 주세요.";
-        document.getElementById("studentMsg").style.color = "#dc2626";
-        return;
+    // Live clock update
+    function updateClock() {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const elStudent = document.getElementById("clientTime");
+      const elAdmin = document.getElementById("adminTime");
+      if (elStudent) elStudent.innerText = timeStr;
+      if (elAdmin) elAdmin.innerText = timeStr;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Fetch user public IP address
+    async function fetchIp() {
+      try {
+        const res = await fetch("https://api.ipify.org?format=json");
+        const data = await res.json();
+        currentClientIp = data.ip;
+        document.getElementById("clientIp").innerText = currentClientIp;
+      } catch (err) {
+        document.getElementById("clientIp").innerText = "Unavailable";
       }
-      
+    }
+    fetchIp();
+
+    // CORS-safe API requester for Google Apps Script
+    async function callAppsScript(payload) {
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
-        body: JSON.stringify({ action: "validateToken", token: token })
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      
-      if (data.status === "valid") {
-        document.getElementById("studentMsg").innerText = "출석 정보를 입력해 주세요.";
-        document.getElementById("studentMsg").style.color = "#16a34a";
-        document.getElementById("attendanceForm").classList.remove("hidden");
-      } else {
-        document.getElementById("studentMsg").innerText = data.message;
-        document.getElementById("studentMsg").style.color = "#dc2626";
+      return await res.json();
+    }
+
+    // Student token validation
+    async function initStudentView() {
+      const msg = document.getElementById("studentMsg");
+      if (!token) {
+        msg.innerText = "Please scan the classroom QR code to check in.";
+        msg.style.color = "#dc2626";
+        return;
+      }
+
+      try {
+        const data = await callAppsScript({ action: "validateToken", token: token });
+        if (data.status === "valid") {
+          msg.innerText = "Session active. Enter your details below.";
+          msg.style.color = "#16a34a";
+          document.getElementById("attendanceForm").classList.remove("hidden");
+        } else {
+          msg.innerText = data.message || "This attendance link is invalid or expired.";
+          msg.style.color = "#dc2626";
+        }
+      } catch (e) {
+        msg.innerText = "Connection error. Ensure the Apps Script URL is deployed correctly.";
+        msg.style.color = "#dc2626";
       }
     }
 
-    // 학생 출석 제출
+    // Student submission handler
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const msg = document.getElementById("studentMsg");
-      msg.innerText = "제출 중...";
-      msg.style.color = "#555";
+      const btn = document.getElementById("submitBtn");
       
-      const studentId = document.getElementById("studentId").value;
-      const name = document.getElementById("studentName").value;
-      
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        body: JSON.stringify({ action: "submitAttendance", token: token, studentId: studentId, name: name })
-      });
-      const data = await res.json();
-      
-      if (data.status === "success") {
-        document.getElementById("attendanceForm").classList.add("hidden");
-        msg.innerText = data.message;
-        msg.style.color = "#16a34a";
-      } else {
-        msg.innerText = data.message;
+      btn.disabled = true;
+      msg.innerText = "Submitting attendance...";
+      msg.style.color = "#4b5563";
+
+      const studentId = document.getElementById("studentId").value.trim();
+      const name = document.getElementById("studentName").value.trim();
+
+      try {
+        const data = await callAppsScript({
+          action: "submitAttendance",
+          token: token,
+          studentId: studentId,
+          name: name,
+          clientIp: currentClientIp
+        });
+
+        if (data.status === "success") {
+          document.getElementById("attendanceForm").classList.add("hidden");
+          msg.innerText = data.message || "Attendance recorded successfully.";
+          msg.style.color = "#16a34a";
+        } else {
+          msg.innerText = data.message || "Submission failed.";
+          msg.style.color = "#dc2626";
+          btn.disabled = false;
+        }
+      } catch (err) {
+        msg.innerText = "Network error. Try submitting again.";
         msg.style.color = "#dc2626";
+        btn.disabled = false;
       }
     });
 
-    // 관리자 세션 시작 및 QR 출력
+    // Admin session creation
     async function startSession() {
-      const adminKey = document.getElementById("adminKey").value;
+      const adminKey = document.getElementById("adminKey").value.trim();
       const duration = document.getElementById("duration").value;
-      
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        body: JSON.stringify({ action: "createSession", adminKey: adminKey, durationMinutes: duration })
-      });
-      const data = await res.json();
-      
-      if (data.status === "success") {
-        document.getElementById("adminAuth").classList.add("hidden");
-        document.getElementById("sessionDisplay").classList.remove("hidden");
-        
-        // 현재 도메인 + ?token=XXX 주소로 QR 생성
-        const targetUrl = window.location.origin + window.location.pathname + "?token=" + data.token;
-        document.getElementById("qrcode").innerHTML = "";
-        new QRCode(document.getElementById("qrcode"), {
-          text: targetUrl,
-          width: 220,
-          height: 220
+      const status = document.getElementById("adminStatus");
+
+      status.innerText = "Connecting to backend...";
+      status.style.color = "#4b5563";
+
+      try {
+        const data = await callAppsScript({
+          action: "createSession",
+          adminKey: adminKey,
+          durationMinutes: duration
         });
-        
-        document.getElementById("timerText").innerText = duration + "분 동안 출석 링크가 유효합니다.";
-      } else {
-        alert(data.message);
+
+        if (data.status === "success") {
+          document.getElementById("adminAuth").classList.add("hidden");
+          document.getElementById("sessionDisplay").classList.remove("hidden");
+
+          const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(data.token);
+          
+          document.getElementById("qrcode").innerHTML = "";
+          new QRCode(document.getElementById("qrcode"), {
+            text: targetUrl,
+            width: 220,
+            height: 220,
+            correctLevel: QRCode.CorrectLevel.M
+          });
+
+          document.getElementById("timerText").innerText = `Session active for ${duration} minute(s)`;
+        } else {
+          status.innerText = data.message || "Authentication failed.";
+          status.style.color = "#dc2626";
+        }
+      } catch (err) {
+        status.innerText = "Error connecting to Apps Script API. Verify URL & access permissions.";
+        status.style.color = "#dc2626";
       }
     }
 
-    function openAdmin() {
-      document.getElementById("studentBox").classList.add("hidden");
-      document.getElementById("adminBox").classList.remove("hidden");
+    function toggleView(view) {
+      if (view === 'admin') {
+        document.getElementById("studentBox").classList.add("hidden");
+        document.getElementById("adminBox").classList.remove("hidden");
+      } else {
+        document.getElementById("adminBox").classList.add("hidden");
+        document.getElementById("studentBox").classList.remove("hidden");
+      }
     }
 
-    function closeSession() {
-      location.reload();
-    }
-
-    if (!location.search.includes("admin")) {
+    if (!window.location.search.includes("admin")) {
       initStudentView();
     }
   </script>
