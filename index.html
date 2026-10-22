@@ -171,7 +171,7 @@
     <div id="statusMsg" class="status">Initializing...</div>
     <div id="errorBox"></div>
 
-    <!-- QR Display for Instructor Screen -->
+    <!-- QR Section -->
     <div id="qrSection" class="hidden">
       <div id="qrcodeContainer">
         <img id="qrImage" src="" alt="Attendance QR Code">
@@ -233,36 +233,39 @@
   </div>
 
   <script>
+    // Global Error Logger to card box
     window.onerror = function(msg, url, lineNo, columnNo, error) {
       const errBox = document.getElementById("errorBox");
       if (errBox) {
         errBox.style.display = "block";
-        errBox.innerText = "[Frontend Error]\nMessage: " + msg + "\nLine: " + lineNo + ":" + columnNo + "\nStack: " + (error ? error.stack : "N/A");
+        errBox.innerText = "[Frontend Error]\n" + msg + "\nLine: " + lineNo + ":" + columnNo;
       }
       return false;
     };
 
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
-    // 1. Device UUID Generator & Cache
-    function getOrCreateDeviceId() {
-      let id = localStorage.getItem("vis141_device_id");
+    // Safe Device UUID Generation (No reliance on fragile toString chains)
+    function getSafeDeviceId() {
+      let id = "";
+      try {
+        id = localStorage.getItem("vis141_dev_id") || "";
+      } catch(e) {
+        id = "";
+      }
       if (!id) {
-        if (crypto && crypto.randomUUID) {
-          id = crypto.randomUUID();
-        } else {
-          id = "dev-" + Math.random().toString(36).substring(2, 12) + "-" + Date.now().toString(36);
-        }
-        localStorage.setItem("vis141_device_id", id);
+        id = "id_" + Math.floor(Math.random() * 1000000000) + "_" + Date.now();
+        try {
+          localStorage.setItem("vis141_dev_id", id);
+        } catch(e) {}
       }
       return id;
     }
-    const currentDeviceId = getOrCreateDeviceId();
+    const currentDeviceId = getSafeDeviceId();
 
-    // Check if device already checked in today (Local cache verification)
     function getTodayString() {
       const now = new Date();
-      return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+      return now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
     }
 
     let token = "";
@@ -312,7 +315,7 @@
         const res = await fetch("https://api.ipify.org?format=json");
         const data = await res.json();
         if (data && data.ip) {
-          currentClientIp = String(data.ip);
+          currentClientIp = "" + data.ip;
           document.getElementById("clientIp").innerText = currentClientIp;
         }
       } catch (e) {
@@ -331,17 +334,21 @@
       try {
         return JSON.parse(text);
       } catch (err) {
-        throw new Error("Raw Server Response: " + text);
+        throw new Error("Invalid Server Output: " + text);
       }
     }
 
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // Student scan view (?token=...)
+      // 1. 학생 출석 링크 접근 (?token=...)
       if (token && token.length > 0) {
-        const lastSubmittedDate = localStorage.getItem("vis141_submitted_date");
-        if (lastSubmittedDate === getTodayString()) {
+        let lastDate = "";
+        try {
+          lastDate = localStorage.getItem("vis141_submitted_date") || "";
+        } catch(e) {}
+
+        if (lastDate === getTodayString()) {
           statusMsg.innerText = "This device has already submitted attendance today.";
           statusMsg.style.color = "#dc2626";
           return;
@@ -367,13 +374,14 @@
         return;
       }
 
-      // Instructor screen view
+      // 2. 메인 화면 세션 상태 확인
       statusMsg.innerText = "Checking active session...";
       try {
         const res = await callAppsScript({ action: "getActiveSession" });
         if (res && res.status === "active") {
           statusMsg.innerText = "";
-          renderQr(res.token, Number(res.expiresAtMs));
+          const safeExpiry = parseInt(res.expiresAtMs, 10) || 0;
+          renderQr("" + res.token, safeExpiry);
         } else {
           statusMsg.innerText = "No Active Session. Waiting for instructor to open session.";
           statusMsg.style.color = "#6b7280";
@@ -384,6 +392,7 @@
       }
     }
 
+    // QR 렌더링 및 NaN 방어 타이머
     function renderQr(activeToken, expiresAtMs) {
       document.getElementById("mainTitle").innerText = "Attendance QR Code";
       document.getElementById("qrSection").classList.remove("hidden");
@@ -393,11 +402,15 @@
       document.getElementById("qrImage").src = qrApiUrl;
 
       if (timerInterval) clearInterval(timerInterval);
+
       function updateTimer() {
-        const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+        const now = Date.now();
+        const target = Number(expiresAtMs) || (now + 900000);
+        const remainingSec = Math.max(0, Math.floor((target - now) / 1000));
         const mins = Math.floor(remainingSec / 60);
         const secs = remainingSec % 60;
-        document.getElementById("qrTimer").innerText = "Time Remaining: " + mins + "m " + (secs < 10 ? '0' : '') + secs + "s";
+        
+        document.getElementById("qrTimer").innerText = "Time Remaining: " + mins + "m " + (secs < 10 ? "0" : "") + secs + "s";
 
         if (remainingSec <= 0) {
           clearInterval(timerInterval);
@@ -408,7 +421,7 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // Student Submit Handler
+    // 학생 제출
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
@@ -418,9 +431,9 @@
       const typeSelect = document.getElementById("typeSelect");
       const secSelect = document.getElementById("sectionSelect");
 
-      const studentName = nameInput ? String(nameInput.value).trim() : "";
-      const attendanceType = typeSelect ? String(typeSelect.value) : "Lecture";
-      const selectedSection = secSelect ? String(secSelect.value) : "";
+      const studentName = nameInput ? ("" + nameInput.value).trim() : "";
+      const attendanceType = typeSelect ? ("" + typeSelect.value) : "Lecture";
+      const selectedSection = secSelect ? ("" + secSelect.value) : "";
 
       if (!selectedSection) {
         alert("Please select your enrolled section.");
@@ -446,8 +459,9 @@
         });
 
         if (res && res.status === "success") {
-          // Record successful submission date on device
-          localStorage.setItem("vis141_submitted_date", getTodayString());
+          try {
+            localStorage.setItem("vis141_submitted_date", getTodayString());
+          } catch(e) {}
           document.getElementById("attendanceForm").classList.add("hidden");
           statusMsg.innerText = res.message || "Attendance recorded successfully.";
           statusMsg.style.color = "#16a34a";
@@ -463,12 +477,13 @@
       }
     });
 
+    // 관리자 세션 시작
     async function startSession() {
       const keyInput = document.getElementById("adminKey");
       const durInput = document.getElementById("duration");
       const adminStatus = document.getElementById("adminStatus");
 
-      const adminKey = keyInput ? String(keyInput.value).trim() : "";
+      const adminKey = keyInput ? ("" + keyInput.value).trim() : "";
       const duration = durInput ? Number(durInput.value) : 15;
 
       adminStatus.innerText = "Starting session...";
@@ -483,7 +498,8 @@
 
         if (res && res.status === "success") {
           toggleAdmin(false);
-          renderQr(res.token, Number(res.expiresAtMs));
+          const safeExpiry = parseInt(res.expiresAtMs, 10) || (Date.now() + duration * 60000);
+          renderQr("" + res.token, safeExpiry);
         } else {
           adminStatus.innerText = (res && res.message) ? res.message : "Authentication failed.";
           adminStatus.style.color = "#dc2626";
