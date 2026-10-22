@@ -146,12 +146,12 @@
     <h2>VIS 141 Attendance</h2>
     
     <div class="meta-box">
-      <div>Time: <span id="clientTime">Loading...</span></div>
+      <div>Time: <span id="clientTime">--:--:--</span></div>
       <div>IP: <span id="clientIp">Checking...</span></div>
     </div>
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
-    <div id="studentMsg" class="status">Checking session validity...</div>
+    <div id="studentMsg" class="status"></div>
 
     <form id="attendanceForm" class="hidden">
       <label for="studentName">Full Name</label>
@@ -186,7 +186,7 @@
   <div class="card hidden" id="projectorBox">
     <h2>Classroom Attendance QR</h2>
     <div class="meta-box">
-      <div>Time: <span id="projectorTime">Loading...</span></div>
+      <div>Time: <span id="projectorTime">--:--:--</span></div>
       <div>Status: <span id="projectorStatus" style="color:#2563eb;">Waiting for session...</span></div>
     </div>
 
@@ -205,7 +205,7 @@
     <h2 id="adminPanelTitle">Admin Console</h2>
     <div class="meta-box">
       <div>Target: <span>Google Sheets API</span></div>
-      <div>Time: <span id="adminTime">Loading...</span></div>
+      <div>Time: <span id="adminTime">--:--:--</span></div>
     </div>
 
     <div id="adminAuth">
@@ -242,25 +242,7 @@
     let projectorPollingTimer = null;
     let lastRenderedToken = null;
 
-    function setupScheduleDefaults() {
-      const today = new Date();
-      const isWednesday = (today.getDay() === 3);
-      const notice = document.getElementById("sessionModeNotice");
-      const typeSelect = document.getElementById("typeSelect");
-
-      if (isWednesday) {
-        notice.innerText = "Wednesday: Full Lecture Attendance";
-        notice.style.background = "#e0f2fe";
-        notice.style.color = "#0369a1";
-        typeSelect.value = "Lecture";
-      } else {
-        notice.innerText = "Section Attendance Mode";
-        notice.style.background = "#f3f4f6";
-        notice.style.color = "#374151";
-        typeSelect.value = "Section";
-      }
-    }
-
+    // 1. Clock update (executed immediately)
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -271,33 +253,68 @@
       if (elAdmin) elAdmin.innerText = timeStr;
       if (elProj) elProj.innerText = timeStr;
     }
-    setInterval(updateClock, 1000);
     updateClock();
+    setInterval(updateClock, 1000);
 
+    // 2. Schedule setup (executed immediately)
+    function setupScheduleDefaults() {
+      const today = new Date();
+      const isWednesday = (today.getDay() === 3);
+      const notice = document.getElementById("sessionModeNotice");
+      const typeSelect = document.getElementById("typeSelect");
+
+      if (isWednesday) {
+        notice.innerText = "Wednesday: Full Lecture Attendance";
+        notice.style.background = "#e0f2fe";
+        notice.style.color = "#0369a1";
+        if (typeSelect) typeSelect.value = "Lecture";
+      } else {
+        notice.innerText = "Section Attendance Mode";
+        notice.style.background = "#f3f4f6";
+        notice.style.color = "#374151";
+        if (typeSelect) typeSelect.value = "Section";
+      }
+    }
+    setupScheduleDefaults();
+
+    // 3. Fast non-blocking IP fetch with 2s timeout
     async function fetchIp() {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       try {
-        const res = await fetch("https://api.ipify.org?format=json");
+        const res = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+        clearTimeout(timeoutId);
         const data = await res.json();
         currentClientIp = data.ip;
         document.getElementById("clientIp").innerText = currentClientIp;
       } catch (err) {
-        document.getElementById("clientIp").innerText = "Unavailable";
+        currentClientIp = "Local/Direct";
+        document.getElementById("clientIp").innerText = "Direct";
       }
     }
     fetchIp();
 
+    // 4. Safe API caller with 6s timeout
     async function callAppsScript(payload) {
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload)
-      });
-      return await res.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        return await res.json();
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
+      }
     }
 
-    // 학생 화면 진입 처리
+    // 5. Student view verification
     async function initStudentView() {
-      setupScheduleDefaults();
       const msg = document.getElementById("studentMsg");
 
       if (!token) {
@@ -305,6 +322,9 @@
         msg.style.color = "#dc2626";
         return;
       }
+
+      msg.innerText = "Validating session...";
+      msg.style.color = "#4b5563";
 
       try {
         const data = await callAppsScript({ action: "validateToken", token: token });
@@ -317,12 +337,12 @@
           msg.style.color = "#dc2626";
         }
       } catch (e) {
-        msg.innerText = "Connection error. Ensure the Apps Script URL is deployed correctly.";
+        msg.innerText = "Connection timeout. Please verify backend deployment.";
         msg.style.color = "#dc2626";
       }
     }
 
-    // 학생 정보 제출
+    // 6. Submit attendance
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const msg = document.getElementById("studentMsg");
@@ -364,13 +384,13 @@
           btn.disabled = false;
         }
       } catch (err) {
-        msg.innerText = "Network error. Try submitting again.";
+        msg.innerText = "Submission timeout. Check network connection.";
         msg.style.color = "#dc2626";
         btn.disabled = false;
       }
     });
 
-    // 관리자 세션 시작
+    // 7. Admin session starter
     async function startSession() {
       const adminKey = document.getElementById("adminKey").value.trim();
       const duration = document.getElementById("duration").value;
@@ -407,12 +427,12 @@
           status.style.color = "#dc2626";
         }
       } catch (err) {
-        status.innerText = "Error connecting to Apps Script API. Verify URL & access permissions.";
+        status.innerText = "Failed to connect to backend. Verify Apps Script permissions.";
         status.style.color = "#dc2626";
       }
     }
 
-    // 프로젝터 실시간 동기화 루프
+    // 8. Projector Polling
     async function pollProjectorSession() {
       try {
         const data = await callAppsScript({ action: "getActiveSession" });
@@ -424,7 +444,6 @@
           statusEl.innerText = "Active Session";
           statusEl.style.color = "#16a34a";
 
-          // 토큰이 새로 생겼거나 바뀌었을 때만 QR 갱신
           if (lastRenderedToken !== data.token) {
             lastRenderedToken = data.token;
             qrEl.innerHTML = "";
@@ -449,7 +468,7 @@
           lastRenderedToken = null;
         }
       } catch (e) {
-        // 네트워크 일시 오류 시 무시하고 다음 루프 실행
+        // Ignore periodic network errors
       }
     }
 
@@ -468,13 +487,12 @@
       } else if (view === 'projector') {
         document.getElementById("projectorBox").classList.remove("hidden");
         pollProjectorSession();
-        projectorPollingTimer = setInterval(pollProjectorSession, 4000); // 4초마다 자동 동기화
+        projectorPollingTimer = setInterval(pollProjectorSession, 4000);
       } else {
         document.getElementById("studentBox").classList.remove("hidden");
       }
     }
 
-    // URL 파라미터가 ?display=qr 인 경우 바로 프로젝터 모드로 시작
     if (isDisplayMode) {
       toggleView('projector');
     } else if (!window.location.search.includes("admin")) {
@@ -483,3 +501,4 @@
   </script>
 </body>
 </html>
+
