@@ -62,6 +62,21 @@
       font-size: 0.9rem;
       font-weight: 500;
     }
+    /* 상세 에러 디버그 박스 */
+    #errorBox {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #f87171;
+      color: #991b1b;
+      padding: 0.75rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      text-align: left;
+      margin: 1rem 0;
+      word-break: break-all;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
     label {
       font-size: 0.8rem;
       font-weight: 600;
@@ -154,9 +169,12 @@
     </div>
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
-    <div id="statusMsg" class="status">Loading...</div>
+    <div id="statusMsg" class="status">Initializing...</div>
 
-    <!-- QR Section (Shown when instructor opened session) -->
+    <!-- 브라우저 내부 에러 추적 박스 -->
+    <div id="errorBox"></div>
+
+    <!-- QR Section -->
     <div id="qrSection" class="hidden">
       <div id="qrcodeContainer">
         <img id="qrImage" src="" alt="Attendance QR Code">
@@ -165,7 +183,7 @@
       <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
     </div>
 
-    <!-- Student Attendance Form (Shown when token exists) -->
+    <!-- Student Attendance Form -->
     <form id="attendanceForm" class="hidden">
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
@@ -218,14 +236,30 @@
   </div>
 
   <script>
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxW8KekOze2i98L6l3-wmFUYlqkNfmyoCvUu3Fsf5_T_SW2AtyiFlKdSclwg8jvaH_xA/exec";
+    // 전역 브라우저 에러 캡처기
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      const errBox = document.getElementById("errorBox");
+      if (errBox) {
+        errBox.style.display = "block";
+        errBox.innerText = "[Frontend Error]\nMessage: " + msg + "\nLine: " + lineNo + ":" + columnNo + "\nStack: " + (error ? error.stack : "N/A");
+      }
+      return false;
+    };
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get("token") || "";
+    // 최신 웹 앱 URL (필요시 새로 발급받은 주소로 확인)
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
+
+    let token = "";
+    try {
+      const params = new URLSearchParams(window.location.search);
+      token = params.get("token") || "";
+    } catch(e) {
+      token = "";
+    }
+
     let currentClientIp = "Direct";
     let timerInterval = null;
 
-    // Clock
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -237,7 +271,6 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Schedule Notice
     function setupSchedule() {
       const today = new Date();
       const isWednesday = (today.getDay() === 3);
@@ -258,7 +291,6 @@
     }
     setupSchedule();
 
-    // Safe IP fetch
     async function fetchIp() {
       try {
         const res = await fetch("https://api.ipify.org?format=json");
@@ -273,21 +305,23 @@
     }
     fetchIp();
 
-    // Robust fetch wrapper
     async function callAppsScript(payload) {
       const res = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload)
       });
-      return await res.json();
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        throw new Error("Raw Server Response: " + text);
+      }
     }
 
-    // Page Router
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // Case A: Student entered via QR scan (?token=...)
       if (token && token.length > 0) {
         statusMsg.innerText = "Validating session token...";
         statusMsg.style.color = "#4b5563";
@@ -303,13 +337,12 @@
             statusMsg.style.color = "#dc2626";
           }
         } catch (err) {
-          statusMsg.innerText = "Connection error. Please refresh.";
+          statusMsg.innerText = "Error: " + err.message;
           statusMsg.style.color = "#dc2626";
         }
         return;
       }
 
-      // Case B: Main screen (Check if instructor session is open)
       statusMsg.innerText = "Checking active session...";
       try {
         const res = await callAppsScript({ action: "getActiveSession" });
@@ -326,7 +359,6 @@
       }
     }
 
-    // Zero-dependency pure image QR rendering
     function renderQr(activeToken, expiresAtMs) {
       document.getElementById("mainTitle").innerText = "Attendance QR Code";
       document.getElementById("qrSection").classList.remove("hidden");
@@ -340,7 +372,7 @@
         const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
         const mins = Math.floor(remainingSec / 60);
         const secs = remainingSec % 60;
-        document.getElementById("qrTimer").innerText = `Time Remaining: ${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
+        document.getElementById("qrTimer").innerText = "Time Remaining: " + mins + "m " + (secs < 10 ? '0' : '') + secs + "s";
 
         if (remainingSec <= 0) {
           clearInterval(timerInterval);
@@ -351,7 +383,6 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // Student Submit Handler
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
@@ -375,7 +406,7 @@
       statusMsg.style.color = "#4b5563";
 
       const finalRecord = attendanceType === "Lecture" 
-        ? `Lecture (${selectedSection})` 
+        ? "Lecture (" + selectedSection + ")" 
         : selectedSection;
 
       try {
@@ -397,13 +428,12 @@
           btn.disabled = false;
         }
       } catch (err) {
-        statusMsg.innerText = "Network timeout. Try submitting again.";
+        statusMsg.innerText = "Error: " + err.message;
         statusMsg.style.color = "#dc2626";
         btn.disabled = false;
       }
     });
 
-    // Admin Session Starter
     async function startSession() {
       const keyInput = document.getElementById("adminKey");
       const durInput = document.getElementById("duration");
@@ -430,7 +460,7 @@
           adminStatus.style.color = "#dc2626";
         }
       } catch (err) {
-        adminStatus.innerText = "Failed to communicate with backend.";
+        adminStatus.innerText = "Error: " + err.message;
         adminStatus.style.color = "#dc2626";
       }
     }
@@ -449,7 +479,3 @@
   </script>
 </body>
 </html>
-
-
-
-
