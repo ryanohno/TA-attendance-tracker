@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VIS 141 Attendance</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -80,7 +79,6 @@
       font-size: 0.95rem;
       outline: none;
       background-color: #fff;
-      transition: border-color 0.2s;
     }
     input:focus, select:focus {
       border-color: #111;
@@ -95,15 +93,20 @@
       font-size: 0.95rem;
       cursor: pointer;
       font-weight: 600;
-      transition: background-color 0.2s;
     }
     button:hover {
       background-color: #374151;
     }
-    #qrcodeDisplay {
+    #qrcodeContainer {
       display: flex;
       justify-content: center;
       margin: 1.5rem 0;
+    }
+    #qrImage {
+      width: 230px;
+      height: 230px;
+      border-radius: 8px;
+      border: 1px solid #eee;
     }
     .admin-footer {
       margin-top: 1.75rem;
@@ -135,13 +138,13 @@
       letter-spacing: 0.02em;
     }
     .hidden {
-      display: none;
+      display: none !important;
     }
   </style>
 </head>
 <body>
 
-  <!-- Main View: QR Display (Default) or Form (When token present) -->
+  <!-- Main View -->
   <div class="card" id="mainBox">
     <h2 id="mainTitle">VIS 141 Attendance</h2>
     
@@ -151,16 +154,18 @@
     </div>
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
-    <div id="statusMsg" class="status">Checking active session...</div>
+    <div id="statusMsg" class="status">Loading...</div>
 
-    <!-- QR Container (Shown on main screen when session is active) -->
+    <!-- QR Section (Shown when instructor opened session) -->
     <div id="qrSection" class="hidden">
-      <div id="qrcodeDisplay"></div>
+      <div id="qrcodeContainer">
+        <img id="qrImage" src="" alt="Attendance QR Code">
+      </div>
       <p id="qrTimer" style="font-weight: 600; color: #16a34a; font-size: 0.95rem; margin: 0.5rem 0;"></p>
       <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1.25rem;">Scan this QR code with mobile camera to check in.</p>
     </div>
 
-    <!-- Student Attendance Form (Shown only when token is present in URL) -->
+    <!-- Student Attendance Form (Shown when token exists) -->
     <form id="attendanceForm" class="hidden">
       <label for="studentName">Full Name</label>
       <input type="text" id="studentName" required placeholder="e.g. Jane Doe">
@@ -216,8 +221,8 @@
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get("token");
-    let currentClientIp = "Unknown";
+    const token = urlParams.get("token") || "";
+    let currentClientIp = "Direct";
     let timerInterval = null;
 
     // Clock
@@ -232,7 +237,7 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Schedule default
+    // Schedule Notice
     function setupSchedule() {
       const today = new Date();
       const isWednesday = (today.getDay() === 3);
@@ -253,99 +258,85 @@
     }
     setupSchedule();
 
-    // Fast IP
+    // Safe IP fetch
     async function fetchIp() {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
       try {
-        const res = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
-        clearTimeout(timeoutId);
+        const res = await fetch("https://api.ipify.org?format=json");
         const data = await res.json();
-        currentClientIp = data.ip;
-        document.getElementById("clientIp").innerText = currentClientIp;
-      } catch (err) {
-        currentClientIp = "Direct";
+        if (data && data.ip) {
+          currentClientIp = String(data.ip);
+          document.getElementById("clientIp").innerText = currentClientIp;
+        }
+      } catch (e) {
         document.getElementById("clientIp").innerText = "Direct";
       }
     }
     fetchIp();
 
+    // Robust fetch wrapper
     async function callAppsScript(payload) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        return await res.json();
-      } catch (err) {
-        clearTimeout(timeoutId);
-        throw err;
-      }
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
+      });
+      return await res.json();
     }
 
-    // Main Router
+    // Page Router
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // 1. If URL has ?token=... (Student scanned QR)
-      if (token) {
-        statusMsg.innerText = "Validating session...";
+      // Case A: Student entered via QR scan (?token=...)
+      if (token && token.length > 0) {
+        statusMsg.innerText = "Validating session token...";
+        statusMsg.style.color = "#4b5563";
+
         try {
-          const data = await callAppsScript({ action: "validateToken", token: token });
-          if (data.status === "valid") {
+          const res = await callAppsScript({ action: "validateToken", token: token });
+          if (res && res.status === "valid") {
             statusMsg.innerText = "Session active. Enter your details below.";
             statusMsg.style.color = "#16a34a";
             document.getElementById("attendanceForm").classList.remove("hidden");
           } else {
-            statusMsg.innerText = data.message || "This attendance link is invalid or expired.";
+            statusMsg.innerText = (res && res.message) ? res.message : "Attendance link is expired or invalid.";
             statusMsg.style.color = "#dc2626";
           }
-        } catch (e) {
-          statusMsg.innerText = "Failed to connect to backend.";
+        } catch (err) {
+          statusMsg.innerText = "Connection error. Please refresh.";
           statusMsg.style.color = "#dc2626";
         }
         return;
       }
 
-      // 2. Default screen without token (Display QR if session is alive)
+      // Case B: Main screen (Check if instructor session is open)
       statusMsg.innerText = "Checking active session...";
       try {
-        const data = await callAppsScript({ action: "getActiveSession" });
-        if (data.status === "active") {
+        const res = await callAppsScript({ action: "getActiveSession" });
+        if (res && res.status === "active") {
           statusMsg.innerText = "";
-          renderQr(data.token, data.expiresAtMs);
+          renderQr(res.token, Number(res.expiresAtMs));
         } else {
           statusMsg.innerText = "No Active Session. Waiting for instructor to open session.";
           statusMsg.style.color = "#6b7280";
         }
-      } catch (e) {
-        statusMsg.innerText = "Cannot fetch session status. Check Apps Script URL.";
-        statusMsg.style.color = "#dc2626";
+      } catch (err) {
+        statusMsg.innerText = "No active session currently found.";
+        statusMsg.style.color = "#6b7280";
       }
     }
 
+    // Zero-dependency pure image QR rendering
     function renderQr(activeToken, expiresAtMs) {
       document.getElementById("mainTitle").innerText = "Attendance QR Code";
       document.getElementById("qrSection").classList.remove("hidden");
 
-      const qrContainer = document.getElementById("qrcodeDisplay");
-      qrContainer.innerHTML = "";
       const targetUrl = window.location.origin + window.location.pathname + "?token=" + encodeURIComponent(activeToken);
-
-      new QRCode(qrContainer, {
-        text: targetUrl,
-        width: 240,
-        height: 240,
-        correctLevel: QRCode.CorrectLevel.M
-      });
+      const qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(targetUrl);
+      document.getElementById("qrImage").src = qrApiUrl;
 
       if (timerInterval) clearInterval(timerInterval);
-      function updateRemaining() {
+      function updateTimer() {
         const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
         const mins = Math.floor(remainingSec / 60);
         const secs = remainingSec % 60;
@@ -356,19 +347,23 @@
           location.reload();
         }
       }
-      updateRemaining();
-      timerInterval = setInterval(updateRemaining, 1000);
+      updateTimer();
+      timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // Student Form Submit
+    // Student Submit Handler
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
       const btn = document.getElementById("submitBtn");
 
-      const name = document.getElementById("studentName").value.trim();
-      const attendanceType = document.getElementById("typeSelect").value;
-      const selectedSection = document.getElementById("sectionSelect").value;
+      const nameInput = document.getElementById("studentName");
+      const typeSelect = document.getElementById("typeSelect");
+      const secSelect = document.getElementById("sectionSelect");
+
+      const studentName = nameInput ? String(nameInput.value).trim() : "";
+      const attendanceType = typeSelect ? String(typeSelect.value) : "Lecture";
+      const selectedSection = secSelect ? String(secSelect.value) : "";
 
       if (!selectedSection) {
         alert("Please select your enrolled section.");
@@ -379,56 +374,59 @@
       statusMsg.innerText = "Submitting attendance...";
       statusMsg.style.color = "#4b5563";
 
-      const formattedRecord = attendanceType === "Lecture" 
+      const finalRecord = attendanceType === "Lecture" 
         ? `Lecture (${selectedSection})` 
         : selectedSection;
 
       try {
-        const data = await callAppsScript({
+        const res = await callAppsScript({
           action: "submitAttendance",
           token: token,
-          name: name,
-          section: formattedRecord,
+          name: studentName,
+          section: finalRecord,
           clientIp: currentClientIp
         });
 
-        if (data.status === "success") {
+        if (res && res.status === "success") {
           document.getElementById("attendanceForm").classList.add("hidden");
-          statusMsg.innerText = data.message || "Attendance recorded successfully.";
+          statusMsg.innerText = res.message || "Attendance recorded successfully.";
           statusMsg.style.color = "#16a34a";
         } else {
-          statusMsg.innerText = data.message || "Submission failed.";
+          statusMsg.innerText = (res && res.message) ? res.message : "Submission failed.";
           statusMsg.style.color = "#dc2626";
           btn.disabled = false;
         }
       } catch (err) {
-        statusMsg.innerText = "Submission timeout. Check network connection.";
+        statusMsg.innerText = "Network timeout. Try submitting again.";
         statusMsg.style.color = "#dc2626";
         btn.disabled = false;
       }
     });
 
-    // Admin Start Session
+    // Admin Session Starter
     async function startSession() {
-      const adminKey = document.getElementById("adminKey").value.trim();
-      const duration = document.getElementById("duration").value;
+      const keyInput = document.getElementById("adminKey");
+      const durInput = document.getElementById("duration");
       const adminStatus = document.getElementById("adminStatus");
+
+      const adminKey = keyInput ? String(keyInput.value).trim() : "";
+      const duration = durInput ? Number(durInput.value) : 15;
 
       adminStatus.innerText = "Starting session...";
       adminStatus.style.color = "#4b5563";
 
       try {
-        const data = await callAppsScript({
+        const res = await callAppsScript({
           action: "createSession",
           adminKey: adminKey,
           durationMinutes: duration
         });
 
-        if (data.status === "success") {
+        if (res && res.status === "success") {
           toggleAdmin(false);
-          renderQr(data.token, data.expiresAtMs);
+          renderQr(res.token, Number(res.expiresAtMs));
         } else {
-          adminStatus.innerText = data.message || "Authentication failed.";
+          adminStatus.innerText = (res && res.message) ? res.message : "Authentication failed.";
           adminStatus.style.color = "#dc2626";
         }
       } catch (err) {
@@ -451,3 +449,5 @@
   </script>
 </body>
 </html>
+
+
