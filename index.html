@@ -62,7 +62,6 @@
       font-size: 0.9rem;
       font-weight: 500;
     }
-    /* 상세 에러 디버그 박스 */
     #errorBox {
       display: none;
       background: #fef2f2;
@@ -170,11 +169,9 @@
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
     <div id="statusMsg" class="status">Initializing...</div>
-
-    <!-- 브라우저 내부 에러 추적 박스 -->
     <div id="errorBox"></div>
 
-    <!-- QR Section -->
+    <!-- QR Display for Instructor Screen -->
     <div id="qrSection" class="hidden">
       <div id="qrcodeContainer">
         <img id="qrImage" src="" alt="Attendance QR Code">
@@ -236,7 +233,6 @@
   </div>
 
   <script>
-    // 전역 브라우저 에러 캡처기
     window.onerror = function(msg, url, lineNo, columnNo, error) {
       const errBox = document.getElementById("errorBox");
       if (errBox) {
@@ -246,8 +242,28 @@
       return false;
     };
 
-    // 최신 웹 앱 URL (필요시 새로 발급받은 주소로 확인)
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
+
+    // 1. Device UUID Generator & Cache
+    function getOrCreateDeviceId() {
+      let id = localStorage.getItem("vis141_device_id");
+      if (!id) {
+        if (crypto && crypto.randomUUID) {
+          id = crypto.randomUUID();
+        } else {
+          id = "dev-" + Math.random().toString(36).substring(2, 12) + "-" + Date.now().toString(36);
+        }
+        localStorage.setItem("vis141_device_id", id);
+      }
+      return id;
+    }
+    const currentDeviceId = getOrCreateDeviceId();
+
+    // Check if device already checked in today (Local cache verification)
+    function getTodayString() {
+      const now = new Date();
+      return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0');
+    }
 
     let token = "";
     try {
@@ -322,7 +338,15 @@
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
+      // Student scan view (?token=...)
       if (token && token.length > 0) {
+        const lastSubmittedDate = localStorage.getItem("vis141_submitted_date");
+        if (lastSubmittedDate === getTodayString()) {
+          statusMsg.innerText = "This device has already submitted attendance today.";
+          statusMsg.style.color = "#dc2626";
+          return;
+        }
+
         statusMsg.innerText = "Validating session token...";
         statusMsg.style.color = "#4b5563";
 
@@ -343,6 +367,7 @@
         return;
       }
 
+      // Instructor screen view
       statusMsg.innerText = "Checking active session...";
       try {
         const res = await callAppsScript({ action: "getActiveSession" });
@@ -383,6 +408,7 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
+    // Student Submit Handler
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
@@ -415,10 +441,13 @@
           token: token,
           name: studentName,
           section: finalRecord,
-          clientIp: currentClientIp
+          clientIp: currentClientIp,
+          deviceId: currentDeviceId
         });
 
         if (res && res.status === "success") {
+          // Record successful submission date on device
+          localStorage.setItem("vis141_submitted_date", getTodayString());
           document.getElementById("attendanceForm").classList.add("hidden");
           statusMsg.innerText = res.message || "Attendance recorded successfully.";
           statusMsg.style.color = "#16a34a";
