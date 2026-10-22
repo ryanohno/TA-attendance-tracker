@@ -62,20 +62,6 @@
       font-size: 0.9rem;
       font-weight: 500;
     }
-    #errorBox {
-      display: none;
-      background: #fef2f2;
-      border: 1px solid #f87171;
-      color: #991b1b;
-      padding: 0.75rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
-      text-align: left;
-      margin: 1rem 0;
-      word-break: break-all;
-      font-family: monospace;
-      white-space: pre-wrap;
-    }
     label {
       font-size: 0.8rem;
       font-weight: 600;
@@ -110,6 +96,13 @@
     }
     button:hover {
       background-color: #374151;
+    }
+    .btn-danger {
+      background-color: #dc2626 !important;
+      margin-top: 0.75rem;
+    }
+    .btn-danger:hover {
+      background-color: #b91c1c !important;
     }
     #qrcodeContainer {
       display: flex;
@@ -169,7 +162,6 @@
 
     <div id="sessionModeNotice" class="mode-badge">Checking schedule...</div>
     <div id="statusMsg" class="status">Initializing...</div>
-    <div id="errorBox"></div>
 
     <!-- QR Section -->
     <div id="qrSection" class="hidden">
@@ -223,6 +215,7 @@
       <input type="number" id="duration" value="15" min="1" max="180">
 
       <button onclick="startSession()">Open Session & Generate QR</button>
+      <button onclick="resetTodayData()" class="btn-danger">Reset Today's Attendance & Devices</button>
       <div id="adminStatus" class="status"></div>
     </div>
 
@@ -233,26 +226,13 @@
   </div>
 
   <script>
-    // Global Error Logger to card box
-    window.onerror = function(msg, url, lineNo, columnNo, error) {
-      const errBox = document.getElementById("errorBox");
-      if (errBox) {
-        errBox.style.display = "block";
-        errBox.innerText = "[Frontend Error]\n" + msg + "\nLine: " + lineNo + ":" + columnNo;
-      }
-      return false;
-    };
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
 
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7CeFL2c43_Kbhlp9c5zUQmswCImVCxv5Sq5Zril3DGJ79g-Sg7YmuDTOiDTvEU8iR0g/exec";
-
-    // Safe Device UUID Generation (No reliance on fragile toString chains)
     function getSafeDeviceId() {
       let id = "";
       try {
         id = localStorage.getItem("vis141_dev_id") || "";
-      } catch(e) {
-        id = "";
-      }
+      } catch(e) {}
       if (!id) {
         id = "id_" + Math.floor(Math.random() * 1000000000) + "_" + Date.now();
         try {
@@ -271,7 +251,7 @@
     let token = "";
     try {
       const params = new URLSearchParams(window.location.search);
-      token = params.get("token") || "";
+      token = (params.get("token") || "").trim();
     } catch(e) {
       token = "";
     }
@@ -331,35 +311,32 @@
         body: JSON.stringify(payload)
       });
       const text = await res.text();
-      try {
-        return JSON.parse(text);
-      } catch (err) {
-        throw new Error("Invalid Server Output: " + text);
-      }
+      return JSON.parse(text);
     }
 
     async function initPage() {
       const statusMsg = document.getElementById("statusMsg");
 
-      // 1. 학생 출석 링크 접근 (?token=...)
+      // 1. 학생 출석 폼 접근 (?token=...)
       if (token && token.length > 0) {
-        let lastDate = "";
-        try {
-          lastDate = localStorage.getItem("vis141_submitted_date") || "";
-        } catch(e) {}
-
-        if (lastDate === getTodayString()) {
-          statusMsg.innerText = "This device has already submitted attendance today.";
-          statusMsg.style.color = "#dc2626";
-          return;
-        }
-
         statusMsg.innerText = "Validating session token...";
         statusMsg.style.color = "#4b5563";
 
         try {
           const res = await callAppsScript({ action: "validateToken", token: token });
+          
           if (res && res.status === "valid") {
+            const serverNonce = "" + (res.resetNonce || "1");
+            const localSavedKey = localStorage.getItem("vis141_submitted_lock") || "";
+            const currentLockKey = getTodayString() + "_" + serverNonce;
+
+            // 관리자가 리셋을 누른 경우(Nonce 변경 시) 이전 로컬 락 자동 해제
+            if (localSavedKey === currentLockKey) {
+              statusMsg.innerText = "This device has already submitted attendance today.";
+              statusMsg.style.color = "#dc2626";
+              return;
+            }
+
             statusMsg.innerText = "Session active. Enter your details below.";
             statusMsg.style.color = "#16a34a";
             document.getElementById("attendanceForm").classList.remove("hidden");
@@ -368,7 +345,7 @@
             statusMsg.style.color = "#dc2626";
           }
         } catch (err) {
-          statusMsg.innerText = "Error: " + err.message;
+          statusMsg.innerText = "Connection failed. Please re-scan QR.";
           statusMsg.style.color = "#dc2626";
         }
         return;
@@ -392,7 +369,6 @@
       }
     }
 
-    // QR 렌더링 및 NaN 방어 타이머
     function renderQr(activeToken, expiresAtMs) {
       document.getElementById("mainTitle").innerText = "Attendance QR Code";
       document.getElementById("qrSection").classList.remove("hidden");
@@ -421,19 +397,15 @@
       timerInterval = setInterval(updateTimer, 1000);
     }
 
-    // 학생 제출
+    // 학생 폼 제출
     document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const statusMsg = document.getElementById("statusMsg");
       const btn = document.getElementById("submitBtn");
 
-      const nameInput = document.getElementById("studentName");
-      const typeSelect = document.getElementById("typeSelect");
-      const secSelect = document.getElementById("sectionSelect");
-
-      const studentName = nameInput ? ("" + nameInput.value).trim() : "";
-      const attendanceType = typeSelect ? ("" + typeSelect.value) : "Lecture";
-      const selectedSection = secSelect ? ("" + secSelect.value) : "";
+      const studentName = ("" + document.getElementById("studentName").value).trim();
+      const attendanceType = ("" + document.getElementById("typeSelect").value);
+      const selectedSection = ("" + document.getElementById("sectionSelect").value);
 
       if (!selectedSection) {
         alert("Please select your enrolled section.");
@@ -459,9 +431,13 @@
         });
 
         if (res && res.status === "success") {
+          // 기기 락 저장
           try {
-            localStorage.setItem("vis141_submitted_date", getTodayString());
+            const check = await callAppsScript({ action: "getActiveSession" });
+            const nonce = (check && check.resetNonce) ? check.resetNonce : "1";
+            localStorage.setItem("vis141_submitted_lock", getTodayString() + "_" + nonce);
           } catch(e) {}
+
           document.getElementById("attendanceForm").classList.add("hidden");
           statusMsg.innerText = res.message || "Attendance recorded successfully.";
           statusMsg.style.color = "#16a34a";
@@ -471,7 +447,7 @@
           btn.disabled = false;
         }
       } catch (err) {
-        statusMsg.innerText = "Error: " + err.message;
+        statusMsg.innerText = "Error submitting attendance. Try again.";
         statusMsg.style.color = "#dc2626";
         btn.disabled = false;
       }
@@ -479,12 +455,9 @@
 
     // 관리자 세션 시작
     async function startSession() {
-      const keyInput = document.getElementById("adminKey");
-      const durInput = document.getElementById("duration");
+      const adminKey = ("" + document.getElementById("adminKey").value).trim();
+      const duration = Number(document.getElementById("duration").value) || 15;
       const adminStatus = document.getElementById("adminStatus");
-
-      const adminKey = keyInput ? ("" + keyInput.value).trim() : "";
-      const duration = durInput ? Number(durInput.value) : 15;
 
       adminStatus.innerText = "Starting session...";
       adminStatus.style.color = "#4b5563";
@@ -505,7 +478,37 @@
           adminStatus.style.color = "#dc2626";
         }
       } catch (err) {
-        adminStatus.innerText = "Error: " + err.message;
+        adminStatus.innerText = "Communication failure.";
+        adminStatus.style.color = "#dc2626";
+      }
+    }
+
+    // 관리자 당일 전체 리셋
+    async function resetTodayData() {
+      if (!confirm("Are you sure? This will wipe today's attendance sheet and reset all device locks.")) {
+        return;
+      }
+      const adminKey = ("" + document.getElementById("adminKey").value).trim();
+      const adminStatus = document.getElementById("adminStatus");
+
+      adminStatus.innerText = "Resetting records...";
+      adminStatus.style.color = "#dc2626";
+
+      try {
+        const res = await callAppsScript({
+          action: "resetToday",
+          adminKey: adminKey
+        });
+
+        if (res && res.status === "success") {
+          alert("Today's attendance data and device locks have been completely reset.");
+          location.reload();
+        } else {
+          adminStatus.innerText = (res && res.message) ? res.message : "Reset failed.";
+          adminStatus.style.color = "#dc2626";
+        }
+      } catch (err) {
+        adminStatus.innerText = "Communication failure.";
         adminStatus.style.color = "#dc2626";
       }
     }
