@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>출석 시스템</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f4f6f8; }
+    .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 420px; box-sizing: border-box; text-align: center; }
+    h2 { margin-top: 0; color: #111; }
+    input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
+    button { width: 100%; padding: 0.8rem; background: #111; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+    button:hover { background: #333; }
+    .status { margin-top: 1rem; font-size: 0.95rem; }
+    #qrcode { display: flex; justify-content: center; margin: 1.5rem 0; }
+    .hidden { display: none; }
+    .admin-link { margin-top: 1.5rem; font-size: 0.8rem; color: #888; cursor: pointer; text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+  <!-- 학생 뷰 -->
+  <div class="card" id="studentBox">
+    <h2>강의 출석 체크</h2>
+    <div id="studentMsg" class="status">세션 확인 중...</div>
+    
+    <form id="attendanceForm" class="hidden" style="margin-top: 1.5rem; text-align: left;">
+      <label style="font-size:0.85rem; font-weight:600; color:#555;">학번</label>
+      <input type="text" id="studentId" required placeholder="학번 입력">
+      <label style="font-size:0.85rem; font-weight:600; color:#555;">이름</label>
+      <input type="text" id="studentName" required placeholder="이름 입력">
+      <button type="submit">출석 완료</button>
+    </form>
+    
+    <div class="admin-link" onclick="openAdmin()">관리자 모드 (프로젝터용)</div>
+  </div>
+
+  <!-- 관리자 / 프로젝터 뷰 -->
+  <div class="card hidden" id="adminBox">
+    <h2>출석 QR 생성기</h2>
+    <div id="adminAuth">
+      <input type="password" id="adminKey" placeholder="관리자 암호">
+      <input type="number" id="duration" value="15" placeholder="유효 시간(분 단위)">
+      <button onclick="startSession()">QR 생성 및 출석 시작</button>
+    </div>
+    
+    <div id="sessionDisplay" class="hidden">
+      <div id="qrcode"></div>
+      <p id="timerText" style="font-weight: 600; color: #16a34a;"></p>
+      <p style="font-size: 0.85rem; color: #666;">스마트폰 기본 카메라로 QR을 스캔하세요.</p>
+      <button onclick="closeSession()" style="background: #b91c1c; margin-top: 1rem;">출석 조기 마감</button>
+    </div>
+    
+    <div class="admin-link" onclick="location.href = location.pathname">학생 폼으로 이동</div>
+  </div>
+
+  <script>
+    // 배포한 Apps Script 웹 앱 URL 입력
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwJL1qlCEFyxf1_j3efNG7gDg_aYTjRqHsMJo7fb4tZQIeMAzln68sQH44HooU4NniY/exec";
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get("token");
+
+    // 학생 화면 진입 처리
+    async function initStudentView() {
+      if (!token) {
+        document.getElementById("studentMsg").innerText = "화면의 QR 코드를 스캔하여 접속해 주세요.";
+        document.getElementById("studentMsg").style.color = "#dc2626";
+        return;
+      }
+      
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "validateToken", token: token })
+      });
+      const data = await res.json();
+      
+      if (data.status === "valid") {
+        document.getElementById("studentMsg").innerText = "출석 정보를 입력해 주세요.";
+        document.getElementById("studentMsg").style.color = "#16a34a";
+        document.getElementById("attendanceForm").classList.remove("hidden");
+      } else {
+        document.getElementById("studentMsg").innerText = data.message;
+        document.getElementById("studentMsg").style.color = "#dc2626";
+      }
+    }
+
+    // 학생 출석 제출
+    document.getElementById("attendanceForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("studentMsg");
+      msg.innerText = "제출 중...";
+      msg.style.color = "#555";
+      
+      const studentId = document.getElementById("studentId").value;
+      const name = document.getElementById("studentName").value;
+      
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "submitAttendance", token: token, studentId: studentId, name: name })
+      });
+      const data = await res.json();
+      
+      if (data.status === "success") {
+        document.getElementById("attendanceForm").classList.add("hidden");
+        msg.innerText = data.message;
+        msg.style.color = "#16a34a";
+      } else {
+        msg.innerText = data.message;
+        msg.style.color = "#dc2626";
+      }
+    });
+
+    // 관리자 세션 시작 및 QR 출력
+    async function startSession() {
+      const adminKey = document.getElementById("adminKey").value;
+      const duration = document.getElementById("duration").value;
+      
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "createSession", adminKey: adminKey, durationMinutes: duration })
+      });
+      const data = await res.json();
+      
+      if (data.status === "success") {
+        document.getElementById("adminAuth").classList.add("hidden");
+        document.getElementById("sessionDisplay").classList.remove("hidden");
+        
+        // 현재 도메인 + ?token=XXX 주소로 QR 생성
+        const targetUrl = window.location.origin + window.location.pathname + "?token=" + data.token;
+        document.getElementById("qrcode").innerHTML = "";
+        new QRCode(document.getElementById("qrcode"), {
+          text: targetUrl,
+          width: 220,
+          height: 220
+        });
+        
+        document.getElementById("timerText").innerText = duration + "분 동안 출석 링크가 유효합니다.";
+      } else {
+        alert(data.message);
+      }
+    }
+
+    function openAdmin() {
+      document.getElementById("studentBox").classList.add("hidden");
+      document.getElementById("adminBox").classList.remove("hidden");
+    }
+
+    function closeSession() {
+      location.reload();
+    }
+
+    if (!location.search.includes("admin")) {
+      initStudentView();
+    }
+  </script>
+</body>
+</html>
